@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="tr">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ulusal Deprem Takip ve Analiz Paneli</title>
+
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+
+    <style>
+        html,
+        body {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            width: 100%;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f8f9fa;
+            overflow: hidden;
+        }
+
+        /* Kurumsal Sol Kontrol Paneli (Sidebar) */
+        #sidebar {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 320px;
+            height: 100%;
+            background: #1e293b;
+            box-shadow: 4px 0 20px rgba(0, 0, 0, 0.08);
+            z-index: 2000;
+            display: flex;
+            flex-direction: column;
+            border-right: 1px solid #e1e4e8;
+        }
+
+        .sidebar-header {
+            background: linear-gradient(135deg, #1e293b, #0f172a);
+            color: white;
+            padding: 25px 20px;
+            text-align: center;
+        }
+
+        .sidebar-header h2 {
+            margin: 0;
+            font-size: 16px;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+        }
+
+        .sidebar-header p {
+            margin: 5px 0 0 0;
+            font-size: 11px;
+            color: #94a3b8;
+        }
+
+        .sidebar-content {
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            overflow-y: auto;
+        }
+
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .form-group label {
+            font-size: 12px;
+            font-weight: 600;
+            color: #e2e8f0;
+        }
+
+        input[type="date"] {
+            padding: 10px 12px;
+            border: 1px solid #cbd5e1;
+            border-radius: 8px;
+            font-size: 13px;
+            background-color: #f8fafc;
+            outline: none;
+            transition: all 0.3s ease;
+        }
+
+        input[type="date"]:focus {
+            border-color: #3b82f6;
+            background-color: #fff;
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+        }
+
+        button {
+            padding: 12px;
+            background: linear-gradient(135deg, #2563eb, #1d4ed8);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 13px;
+            box-shadow: 0 4px 12px rgba(37, 99, 235, 0.25);
+            transition: all 0.3s ease;
+            margin-top: 10px;
+        }
+
+        button:hover {
+            background: linear-gradient(135deg, #1d4ed8, #1e40af);
+            box-shadow: 0 6px 15px rgba(37, 99, 235, 0.35);
+            transform: translateY(-1px);
+        }
+
+        button:active {
+            transform: translateY(0);
+        }
+
+        /* Harita Alanı */
+        #map {
+            position: absolute;
+            top: 0;
+            left: 320px;
+            width: calc(100% - 320px);
+            height: 100%;
+        }
+
+        .leaflet-tooltip {
+            background-color: rgba(255, 255, 255, 0.95) !important;
+            border: none !important;
+            border-radius: 8px !important;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.15) !important;
+            padding: 10px 14px !important;
+        }
+
+        /* Yükleniyor Göstergesi */
+        #loading-overlay {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: rgba(15, 23, 42, 0.85);
+            backdrop-filter: blur(8px);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-size: 13px;
+            font-weight: 500;
+            z-index: 3000;
+            display: none;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+        }
+    </style>
+</head>
+
+<body>
+
+    <!-- Yükleniyor Bildirimi -->
+    <div id="loading-overlay">Veriler işleniyor...</div>
+
+    <!-- Sol Kurumsal Yan Menü (Sidebar) -->
+    <div id="sidebar">
+        <div class="sidebar-header">
+            <h2>Deprem Takip Paneli</h2>
+            <p>Coğrafi Bilgi Sistemi Analiz Modülü</p>
+        </div>
+
+        <div class="sidebar-content">
+            <div class="form-group">
+                <label>Başlangıç Tarihi</label>
+                <input type="date" id="baslangicTarihi" value="2026-05-18">
+            </div>
+
+            <div class="form-group">
+                <label>Bitiş Tarihi</label>
+                <input type="date" id="bitisTarihi" value="2026-08-18">
+            </div>
+
+            <button id="btnGuncelle" onclick="depremleriGetir()">Verileri Güncelle ve Göster</button>
+        </div>
+    </div>
+
+    <!-- Harita Alanı -->
+    <div id="map"></div>
+
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <script>
+        const harita = L.map('map', {
+            zoomControl: false,
+            minZoom: 4
+        }).setView([39.1667, 35.6667], 6);
+
+        L.control.zoom({ position: 'topright' }).addTo(harita);
+
+        const altlikHarita = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+            maxZoom: 19,
+            noWrap: true,
+            attribution: '&copy; OpenStreetMap contributors &copy; CARTO'
+        }).addTo(harita);
+
+        let kritikDepremler = L.layerGroup();
+        let ortaDepremler = L.layerGroup();
+        let kucukDepremler = L.layerGroup();
+        let fayKatmani = L.featureGroup(); // Fay katmanı en başta tanımlandı
+
+        let katmanlarObjesi = {
+            "🔴 Kritik Depremler (5.0+)": kritikDepremler,
+            "🟠 Orta Şiddetli (4.0 - 4.9)": ortaDepremler,
+            "🟢 Küçük Depremler (< 4.0)": kucukDepremler,
+            "〰️ Diri Fay Hatları": fayKatmani
+        };
+
+        // Sağ üstteki katman kontrolcüsüne bağlıyoruz
+        L.control.layers(null, katmanlarObjesi, { position: 'topright', collapsed: false }).addTo(harita);
+
+        async function depremleriGetir() {
+            const baslangic = document.getElementById('baslangicTarihi').value;
+            const bitis = document.getElementById('bitisTarihi').value;
+            const loadingOverlay = document.getElementById('loading-overlay');
+            const btnGuncelle = document.getElementById('btnGuncelle');
+
+            if (!baslangic || !bitis) {
+                alert("Lütfen tarih aralığı seçin!");
+                return;
+            }
+
+            loadingOverlay.style.display = 'block';
+            btnGuncelle.disabled = true;
+
+            await new Promise(resolve => setTimeout(resolve, 50));
+
+            kritikDepremler.clearLayers();
+            ortaDepremler.clearLayers();
+            kucukDepremler.clearLayers();
+
+            try {
+                const response = await fetch(`http://localhost:5170/api/depremler?baslangic=${baslangic}&bitis=${bitis}`);
+                const veriler = await response.json();
+
+                if (veriler.length === 0) {
+                    alert("Bu tarih aralığında deprem bulunamadı.");
+                    loadingOverlay.style.display = 'none';
+                    btnGuncelle.disabled = false;
+                    return;
+                }
+
+                veriler.forEach(deprem => {
+                    let yaricap = Math.pow(deprem.siddet, 1.4) * 1.0;
+
+                    let renk = deprem.siddet >= 5.0 ? '#d90429' :
+                        deprem.siddet >= 4.0 ? '#f77f00' :
+                            deprem.siddet >= 3.0 ? '#fcbf49' : '#2b9348';
+
+                    let nokta = L.circleMarker([deprem.enlem, deprem.boylam], {
+                        radius: Math.max(yaricap, 2),
+                        fillColor: renk,
+                        color: '#000',
+                        weight: 0.2,
+                        opacity: 0.6,
+                        fillOpacity: 0.65
+                    });
+
+                    let bilgi = `
+                        <div style="font-family:'Segoe UI',sans-serif;">
+                            <h4 style="margin:0 0 6px 0; color:#d90429; font-size:14px; border-bottom:1px solid #eee; padding-bottom:4px;">${deprem.yer}</h4>
+                            <div style="font-size:12px; color:#445566; line-height:1.4;">
+                                <b>Şiddet:</b> <span style="color:#000; font-weight:bold;">${deprem.siddet}</span><br/>
+                                <b>Tarih:</b> ${deprem.tarih}
+                            </div>
+                        </div>
+                    `;
+                    nokta.bindTooltip(bilgi);
+
+                    if (deprem.siddet >= 5.0) {
+                        kritikDepremler.addLayer(nokta);
+                    } else if (deprem.siddet >= 4.0) {
+                        ortaDepremler.addLayer(nokta);
+                    } else {
+                        kucukDepremler.addLayer(nokta);
+                    }
+                });
+
+                harita.addLayer(kritikDepremler);
+                harita.addLayer(ortaDepremler);
+
+            } catch (error) {
+                alert("Veriler çekilirken bir hata oluştu. API (siyah ekran) çalışıyor mu kontrol et!");
+                console.error(error);
+            } finally {
+                loadingOverlay.style.display = 'none';
+                btnGuncelle.disabled = false;
+            }
+        }
+
+        // Diri fay hatlarını API'den çeken fonksiyon (Bağımsız ve global)
+        // Diri fay hatlarını API'den çeken ve haritaya basan düzeltilmiş fonksiyon
+        async function diriFaylariYukle() {
+            try {
+                // C# API'nin çalıştığı port numarasını buraya yazıyoruz (Örn: 5170)
+                let response = await fetch('http://localhost:5170/api/fay/faylari-getir');
+
+                if (!response.ok) {
+                    throw new Error("API'den fay verisi alınamadı! HTTP kod: " + response.status);
+                }
+
+                let geojsonVerisi = await response.json();
+
+                L.geoJSON(geojsonVerisi, {
+                    style: function (feature) {
+                        return {
+                            color: "#ff0000", // Kıpkırmızı fay çizgileri
+                            weight: 2.5,
+                            opacity: 0.8
+                        };
+                    },
+                    onEachFeature: function (feature, layer) {
+                        if (feature.properties) {
+                            let props = feature.properties;
+                            layer.bindPopup(`
+                                <b>Fay Adı:</b> ${props.fayAdi || 'Bilinmiyor'} <br>
+                                <b>Aktivite:</b> ${props.aktivite || '-'} <br>
+                                <b>Kayma Türü:</b> ${props.kaymaTuru || '-'} <br>
+                                <b>Uzunluk:</b> ${props.uzunluk || '-'} km
+                            `);
+                        }
+                    }
+                }).addTo(fayKatmani);
+
+                // Fay katmanını haritaya ekliyoruz
+                harita.addLayer(fayKatmani);
+
+                console.log("Diri fay hatları başarıyla yüklendi ve haritaya eklendi!");
+            } catch (error) {
+                console.error("Faylar yüklenirken hata oluştu:", error);
+            }
+        }
+
+        // Sayfa açıldığında fonksiyonu tetikliyoruz
+        diriFaylariYukle();
+    </script>
+</body>
+
+</html>
